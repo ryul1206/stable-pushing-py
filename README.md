@@ -1,10 +1,12 @@
 # Hybrid A*-based Push Planner
 
-It's a 2D push planner made in a hurry and messy.
+It's a 2D push planner made in a hurry and messy. So, it is very slow.
 
 `hybrid a-star algorithm`
 
 ## Demo
+
+The current timeout is 10 secs.
 
 ```sh
 python debug.py

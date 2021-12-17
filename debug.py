@@ -47,13 +47,17 @@ class Debug:
         self.ignore_goal_orientation = False
 
         # algorithm
-
         self.grid_dxy_pixel = meter2pixel(grid_width_m)
         self.grid_dtheta_degree = 12
         self.astar = hybrid_astar.HybridAstar(
-            pixel2meter(self.grid_dxy_pixel), np.radians(self.grid_dtheta_degree)
+            pixel2meter(self.grid_dxy_pixel),
+            np.radians(self.grid_dtheta_degree),
+            0.0,
+            pixel2meter(self.canvas_size[0]),
+            0.0,
+            pixel2meter(self.canvas_size[1]),
         )
-        self.astar.set_successors()
+        self.astar.set_successors("wedge")
         self.astar.set_collision_model(
             pixel2meter(self.obj_radius_pixel),
             pixel2meter(self.robot_radius_pixel),
@@ -129,18 +133,24 @@ class Debug:
             self.robot_xyt_path = result[2]
 
     def event_keyboard(self, event):
+        mode_desc = "`"
         if event.key == pygame.K_1:
             self.mode = 1
+            mode_desc = "Set obstacle"
         elif event.key == pygame.K_2:
             self.mode = 2
+            mode_desc = "Set object start"
         elif event.key == pygame.K_3:
             self.mode = 3
+            mode_desc = "Set object goal"
         elif event.key == pygame.K_4:
+            mode_desc = "Compute path (ori toggle / click: plan)"
             if self.mode != 4:
                 self.mode = 4
             else:
                 self.ignore_goal_orientation = not self.ignore_goal_orientation
         elif event.key == pygame.K_5:
+            mode_desc = "Show grid / check closest point about mouse"
             self.mode = 5
             self.set_obstacle_to_hybrid_aster()
             query_pos = pygame.mouse.get_pos()
@@ -161,8 +171,9 @@ class Debug:
             self.draw_grid()
             self.set_pause()
         elif event.key == pygame.K_SPACE:
+            mode_desc = "Clear obstacles"
             self.clear()
-        print("Mode: %d (ig: %s)" % (self.mode, self.ignore_goal_orientation))
+        print("Mode: [%d] %s (ig: %s)" % (self.mode, mode_desc, self.ignore_goal_orientation))
 
     def set_obstacle_to_hybrid_aster(self):
         metric_points = [

@@ -113,11 +113,12 @@ class Grid:
 
 
 class HybridAstar:
-    def __init__(self, dxy_meter, dtheta_radian):
+    def __init__(self, dxy_meter, dtheta_radian, xmin, xmax, ymin, ymax):
         self.grid_xy_size = dxy_meter
         self.min_drad = dtheta_radian
         print("=== dxy_meter, drad = {:.2f}, {:.1f}".format(dxy_meter, dtheta_radian))
         self.grid = Grid(self.grid_xy_size, self.min_drad)
+        self.workspace = (xmin, xmax, ymin, ymax)
         self.min_succesor_dist = dxy_meter * np.sqrt(2)
 
         # obstacle
@@ -151,8 +152,64 @@ class HybridAstar:
         distance, index = self.kdtree.query(query_xy)
         return distance
 
-    def set_successors(self):
-        diagonal_length = self.min_succesor_dist
+    def set_successors(self, stype="wedge"):
+        diagonal_length = self.min_succesor_dist  # 0.15 * root(2) m
+        min_drad = self.min_drad  # 12 deg
+
+        self.successors = []
+        if stype == "wedge":
+            self.set_wedge_successors(diagonal_length, min_drad)
+        elif stype == "full_circle":
+            # self.set_circle_successors(diagonal_length, min_drad, np.radians(36.01))  # (mu: 4.2654, alpha: 76.806 deg)
+            self.set_circle_successors(diagonal_length, min_drad, np.radians(80.))
+        elif stype == "sm_circle":
+            self.set_circle_successors(diagonal_length, min_drad, np.radians(12.01))  # (mu: 0.5648, alpha: 29.458 deg)
+        else:
+            raise ValueError("Incorrect Successor Type!")
+
+        self.conditions["successor"] = True
+
+    def set_circle_successors(self, _min_succesor_dist, _min_drad, max_heading_change):
+        # chair width = 44 cm
+        _min_succesor_dist  # 15*root(2) = 21.2 cm /2 = 10.6
+        _min_drad  # 12 deg
+
+        def calc_csucc(d_heading_rad):
+            if d_heading_rad != 0.0:
+                _r = _min_succesor_dist / 2.0
+                dx = _r * (1.0 + np.cos(d_heading_rad))
+                dy = _r * np.sin(d_heading_rad)
+                dtheta = d_heading_rad
+                icp_x = 0.0
+                icp_y = _r / np.arctan(-d_heading_rad / 2.0)
+                cost = abs(icp_y) * d_heading_rad
+            else:
+                dx = _min_succesor_dist
+                dy = 0.0
+                dtheta = 0.0
+                cost = _min_succesor_dist
+                icp_x = 0.0
+                icp_y = np.inf
+            return ((dx, dy), dtheta, cost, (icp_x, icp_y))
+
+        # (dxy, dtheta, cost, icp_xy) [meter, rad]
+        drad_list = [(0, 0)]  # type, rad
+        # type(+), rad(+): ccw
+        _rad = _min_drad
+        stype = 1
+        while _rad < max_heading_change:
+            drad_list.append((stype, _rad))
+            drad_list.append((-stype, -_rad))
+            stype += 1
+            _rad += _min_drad
+
+        for style, rad in drad_list:
+            dxy, dtheta, cost, icp_xy = calc_csucc(rad)
+            fw = (style, (dxy, dtheta, cost, icp_xy))
+            self.successors.append(fw)
+
+    def set_wedge_successors(self, _min_succesor_dist, _min_drad):
+        diagonal_length = _min_succesor_dist
 
         def calc_rotation_radius(d_heading_radian):
             radius = np.inf
@@ -187,13 +244,13 @@ class HybridAstar:
         drad_list = [(0, 0)]  # type, rad
         # type(+), rad(+): ccw
         max_rad = np.radians(45)
-        _rad = self.min_drad
+        _rad = _min_drad
         stype = 1
         while _rad < max_rad:
             drad_list.append((stype, _rad))
             drad_list.append((-stype, -_rad))
             stype += 1
-            _rad += self.min_drad
+            _rad += _min_drad
         print("drad_list={}".format(drad_list))
 
         self.successors = [(stype, calc_successor(rad)) for stype, rad in drad_list]
@@ -223,12 +280,18 @@ class HybridAstar:
         self.robot_collision = Collision(robot_radius, robot_width)
         self.conditions["collision_model"] = True
 
+    def is_in_workspace(self, xy):
+        x, y = xy
+        xmin, xmax, ymin, ymax = self.workspace
+        return (x < xmin) or (x > xmax) or (y < ymin) or (y > ymax)
+
     def check_collision(self, obj_xyt):
         obj_xy = (obj_xyt[0], obj_xyt[1])
         object_collide = self.get_closest_distance(obj_xy) < self.object_collision.radius
         robot_xyt = self.calc_robot_xyt(obj_xyt)
         rb_xy = (robot_xyt[0], robot_xyt[1])
         robot_collide = self.get_closest_distance(rb_xy) < self.robot_collision.radius
+        out_of_workspace = (not self.is_in_workspace(obj_xy)) or (not self.is_in_workspace(rb_xy))
         return (object_collide or robot_collide)
 
     def compute_path(self, obj_start, obj_goal, ignore_goal_orientation):

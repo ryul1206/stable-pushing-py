@@ -345,7 +345,7 @@ class HybridAstar:
             if ignore_goal_orientation:
                 h_cost = dist
             else:
-                rate = 0.2
+                rate = 0.3
                 offset = rate * dist
                 q2x, q2y = (qx + offset * np.cos(qrad), qy + offset * np.sin(qrad))
                 g2x, g2y = (gx - offset * np.cos(grad), gy - offset * np.sin(grad))

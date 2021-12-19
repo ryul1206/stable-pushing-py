@@ -35,6 +35,7 @@ class Debug:
         self.obj_radius_pixel = self.obj_width_pixel / np.sqrt(2)
         self.robot_radius_pixel = self.robot_width_pixel / np.sqrt(2)
 
+        self.debug_succs = []
         self.obj_xyt_path = []
         self.robot_xyt_path = []
 
@@ -52,12 +53,21 @@ class Debug:
         self.astar = hybrid_astar.HybridAstar(
             pixel2meter(self.grid_dxy_pixel),
             np.radians(self.grid_dtheta_degree),
-            0.0,
-            pixel2meter(self.canvas_size[0]),
-            0.0,
-            pixel2meter(self.canvas_size[1]),
+            pixel2meter(self.canvas_size[0] * 0.1),
+            pixel2meter(self.canvas_size[0] * 0.9),
+            pixel2meter(self.canvas_size[1] * 0.1),
+            pixel2meter(self.canvas_size[1] * 0.9),
         )
-        self.astar.set_successors("wedge")
+
+        def print_successors(ss):
+            for s in ss:
+                d = s[1]
+                print("stype: {}, (dxy: {}, dth: {:.1f}deg, cost: {:.5f}, icp: {})".format(s[0], d[0], np.degrees(d[1]), d[2], d[3]))
+        # self.astar.set_successors("wedge")
+        self.astar.set_successors("full_circle")
+        # self.astar.set_successors("sm_circle")
+        # print_successors(self.astar.get_successors((0, 0), 0))
+
         self.astar.set_collision_model(
             pixel2meter(self.obj_radius_pixel),
             pixel2meter(self.robot_radius_pixel),
@@ -113,6 +123,10 @@ class Debug:
             self.obj_goal_radian_setting = not self.obj_goal_radian_setting
             print("new pose, rad:{}".format(self.obj_goal))
         elif self.mode == 4:
+            self.debug_succs = []
+            self.obj_xyt_path = []
+            self.robot_xyt_path = []
+
             self.set_obstacle_to_hybrid_aster()
             o_start = (
                 pixel2meter(self.obj_start["xy"][0]),
@@ -124,13 +138,29 @@ class Debug:
                 pixel2meter(self.obj_goal["xy"][1]),
                 self.obj_goal["radian"],
             )
+
+            self.debug_count = 0
             result = self.astar.compute_path(
-                o_start, o_goal, self.ignore_goal_orientation
+                o_start, o_goal, self.ignore_goal_orientation, self.draw_successors_callback
             )
+            self.draw()
+
             # print(result)
             print("job done!")
             self.obj_xyt_path = result[1]
             self.robot_xyt_path = result[2]
+
+    def draw_successors_callback(self, xyt):
+        x, y, rad = xyt
+        length = 0.1
+        p1 = (meter2pixel(x), meter2pixel(y))
+        p2 = (x + np.cos(rad)*length, y + np.sin(rad)*length)
+        p2 = (meter2pixel(p2[0]), meter2pixel(p2[1]))
+        self.debug_succs.append((p1, p2))
+        self.debug_count += 1
+        if self.debug_count > 10:
+            self.draw()
+            self.debug_count = 0
 
     def event_keyboard(self, event):
         mode_desc = "`"
@@ -232,6 +262,10 @@ class Debug:
         self.draw()
 
     def draw(self):
+        # DEBUG
+        for p1, p2 in self.debug_succs:
+            pygame.draw.line(self.canvas, (0, 0, 255), p1, p2, 1)
+            pygame.draw.circle(self.canvas, (0, 0, 255), p1, 3, 1)
         # obstacles
         for pixel_xy, pixel_radius in self.obstacle_list:
             pygame.draw.circle(self.canvas, (0, 0, 0), pixel_xy, pixel_radius, 0)

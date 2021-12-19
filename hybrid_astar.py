@@ -116,7 +116,7 @@ class HybridAstar:
     def __init__(self, dxy_meter, dtheta_radian, xmin, xmax, ymin, ymax):
         self.grid_xy_size = dxy_meter
         self.min_drad = dtheta_radian
-        print("=== dxy_meter, drad = {:.2f}, {:.1f}".format(dxy_meter, dtheta_radian))
+        print("=== GRID dxy, ddeg = {:.2f}, {:.1f}".format(dxy_meter, np.degrees(dtheta_radian)))
         self.grid = Grid(self.grid_xy_size, self.min_drad)
         self.workspace = (xmin, xmax, ymin, ymax)
         self.min_succesor_dist = dxy_meter * np.sqrt(2)
@@ -182,7 +182,7 @@ class HybridAstar:
                 dtheta = d_heading_rad
                 icp_x = 0.0
                 icp_y = _r / np.arctan(-d_heading_rad / 2.0)
-                cost = abs(icp_y) * d_heading_rad
+                cost = abs(icp_y * d_heading_rad)
             else:
                 dx = _min_succesor_dist
                 dy = 0.0
@@ -251,7 +251,7 @@ class HybridAstar:
             drad_list.append((-stype, -_rad))
             stype += 1
             _rad += _min_drad
-        print("drad_list={}".format(drad_list))
+        # print("drad_list={}".format(drad_list))
 
         self.successors = [(stype, calc_successor(rad)) for stype, rad in drad_list]
         self.conditions["successor"] = True
@@ -280,7 +280,7 @@ class HybridAstar:
         self.robot_collision = Collision(robot_radius, robot_width)
         self.conditions["collision_model"] = True
 
-    def is_in_workspace(self, xy):
+    def is_not_in_workspace(self, xy):
         x, y = xy
         xmin, xmax, ymin, ymax = self.workspace
         return (x < xmin) or (x > xmax) or (y < ymin) or (y > ymax)
@@ -291,10 +291,10 @@ class HybridAstar:
         robot_xyt = self.calc_robot_xyt(obj_xyt)
         rb_xy = (robot_xyt[0], robot_xyt[1])
         robot_collide = self.get_closest_distance(rb_xy) < self.robot_collision.radius
-        out_of_workspace = (not self.is_in_workspace(obj_xy)) or (not self.is_in_workspace(rb_xy))
-        return (object_collide or robot_collide)
+        out_of_workspace = (self.is_not_in_workspace(obj_xy)) or (self.is_not_in_workspace(rb_xy))
+        return (object_collide or robot_collide or out_of_workspace)
 
-    def compute_path(self, obj_start, obj_goal, ignore_goal_orientation):
+    def compute_path(self, obj_start, obj_goal, ignore_goal_orientation, draw_cb=None):
         """
         obj_start: pose2d (x, y, heading) [m, m, rad]
         obj_goal: pose2d (x, y, heading) [m, m, rad]
@@ -313,17 +313,51 @@ class HybridAstar:
 
         self.grid = Grid(self.grid_xy_size, self.min_drad)
 
+        def length_of_bezier(a, b, c, d):
+            def bezier_point(t):
+                f1x = a[0] + t * (b[0] - a[0])
+                f1y = a[1] + t * (b[1] - a[1])
+                f2x = b[0] + t * (c[0] - b[0])
+                f2y = b[1] + t * (c[1] - b[1])
+                f3x = c[0] + t * (d[0] - c[0])
+                f3y = c[1] + t * (d[1] - c[1])
+                s1x = f1x + t * (f2x - f1x)
+                s1y = f1y + t * (f2y - f1y)
+                s2x = f2x + t * (f3x - f2x)
+                s2y = f2y + t * (f3y - f2y)
+                x = s1x + t * (s2x - s1x)
+                y = s1y + t * (s2y - s1y)
+                return (x, y)
+            L = 0
+            prev_x, prev_y = a
+            for t in np.linspace(0, 1, 5):
+                x, y = bezier_point(t)
+                L += np.sqrt((x - prev_x) ** 2 + (y - prev_y) ** 2)
+                prev_x, prev_y = x, y
+            return L
+
         def heuristic(query_xyt):
             qx, qy, qrad = query_xyt
             gx, gy, grad = obj_goal
-            dist = np.sqrt((qx - gx)**2 + (qy - gy)**2)
-            if not ignore_goal_orientation:
+            dx = qx - gx
+            dy = qy - gy
+            dist = np.sqrt(dx ** 2 + dy ** 2)
+            if ignore_goal_orientation:
+                h_cost = dist
+            else:
+                rate = 0.2
+                offset = rate * dist
+                q2x, q2y = (qx + offset * np.cos(qrad), qy + offset * np.sin(qrad))
+                g2x, g2y = (gx - offset * np.cos(grad), gy - offset * np.sin(grad))
+                # modified_dist = np.sqrt((q2x - g2x) ** 2 + (q2y - g2y) ** 2) + (2.0 * offset)
+                modified_dist = length_of_bezier((qx, qy), (q2x, q2y), (g2x, g2y), (gx, gy))
+                h_cost = modified_dist
                 # IMPORTANT
                 min_rotation_radius = 0.3
                 drad = abs(qrad - grad)
                 arc_length = min_rotation_radius * drad
-                dist += arc_length
-            return dist
+                h_cost = modified_dist + arc_length
+            return h_cost
 
         def steering_cost(prev_stype, successor_stype):
             if prev_stype is not None:
@@ -342,7 +376,7 @@ class HybridAstar:
 
         goal_index = self.grid.find_grid_index(obj_goal)
         begin_time = time.time()
-        timeout = 10
+        timeout = 30
         print("computing...")
         while open_heap:
             elapsed = time.time() - begin_time
@@ -384,6 +418,8 @@ class HybridAstar:
                         neighbor.steering_type = stype
                         neighbor.set_score(tentative_g, heuristic(xyt))
                         if neighbor not in open_heap:
+                            draw_cb(xyt)
+                            # print(xyt)
                             heapq.heappush(open_heap, neighbor)
                         else:
                             is_not_sorted = True

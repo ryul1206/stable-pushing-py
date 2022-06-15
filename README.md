@@ -4,6 +4,8 @@ It's a 2D push planner made in a hurry and messy. So, it is very slow.
 
 `hybrid a-star algorithm`
 
+가장 최근의 작업물은 `socialrobot_reasoner-devel-pusher_node.zip` 파일에 덤프되어 있다. 알고리즘은 동일한 Hybrid A*이고, 이웃 샘플링할 때 cost 계산만 조금 다르다. 예를 들어, `sqrt` 같은 것을 적게 사용하는 좀더 단순하고 빠른 방법을 사용하면 계산속도 뿐만 아니라, 정답 수렴도 더 적은 node 확장으로 가능했다.
+
 ## Demo
 
 The current timeout is 10 secs.
